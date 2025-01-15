@@ -488,6 +488,9 @@ if __name__ == "__main__":
 		print_error('argparse failure: ' + str(e), FAILED_ARGPARSE)
 
 	try:
+		if not args.local_path.endswith('/'):
+			args.local_path = f'{args.local_path}/'
+
 		if os.path.isfile(args.package_name):
 			requirements_loop(args)
 		else:
