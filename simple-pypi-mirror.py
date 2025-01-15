@@ -320,6 +320,11 @@ def download_package(args):
 
 			if download_file(pkg['href'], local_filename):
 				if local_filename.endswith('.whl'):
+					if pkg['href'].find('#') > 0:
+						uri, hash = pkg['href'].split('#')
+					else:
+						uri = pkg['href']
+
 					if not download_file(f'{uri}.metadata', f'{local_filename}.metadata'):
 						print_error(f'[{package_name}] FAILED to retrieve metadata for {filename}', 0)
 
