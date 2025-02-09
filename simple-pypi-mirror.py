@@ -183,93 +183,7 @@ def download_package(args):
 		path = f'{args.local_path}{package_name}'
 		local_versions = {}
 
-		if os.path.isdir(path):
-			if os.access(path, os.W_OK):
-				path_index = f'{path}/index.html'
-				if os.path.isfile(path_index):
-					with open(path_index, 'r') as f:
-						local_versions = read_package_metadata(f.read(), package_name, True)
-
-				for version, local_files in local_versions.items():
-					for filename, local_file in local_files.items():
-						if local_file.get('hash') is not None and versions[version][filename].get('hash') is not None:
-							if local_file['hash'] == versions[version][filename]['hash']:
-								if os.path.isfile(f'{path}/{filename}'):
-									if local_file['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, local_file['hash_algo'])):
-										if filename.endswith('.whl'):
-											if os.path.isfile(f'{path}/{filename}.metadata'):
-												if versions[version][filename]['meta_hash'] == checksum(f'{path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
-													versions[version][filename]['local_state'] = STATE_OK
-													continue
-
-											versions[version][filename]['local_state'] = STATE_METADATA_MISSING
-											continue
-
-										versions[version][filename]['local_state'] = STATE_OK
-										continue
-
-							# mark for redownload
-							versions[version][filename]['local_state'] = STATE_MISSING
-						elif versions[version][filename].get('hash') is not None:
-							# compare local file hash and if ok add to  metadata (set changed flag)
-							if os.path.isfile(f'{path}/{filename}'):
-								if versions[version][filename]['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, versions[version][filename]['hash_algo'])):
-									if filename.endswith('.whl'):
-										if os.path.isfile(f'{path}/{filename}.metadata'):
-											if versions[version][filename]['meta_hash'] == checksum(f'{path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
-												versions[version][filename]['local_state'] = STATE_OK
-												local_versions[version][filename]['hash_algo'] = versions[version][filename]['hash_algo']
-												local_versions[version][filename]['hash'] = versions[version][filename]['hash']
-												continue
-
-										versions[version][filename]['local_state'] = STATE_METADATA_MISSING
-										continue
-
-									versions[version][filename]['local_state'] = STATE_OK
-									local_versions[version][filename]['hash_algo'] = versions[version][filename]['hash_algo']
-									local_versions[version][filename]['hash'] = versions[version][filename]['hash']
-									continue
-
-
-							versions[version][filename]['local_state'] = STATE_MISSING
-						else:
-							# compare local hash to verify integrity?
-							# log message that no comparison possible & mark for re-download?
-							# Do nothing is effectively STATE_MISSING
-							pass
-
-				# Check for local files that were not included in the local index for whatever reason (process interrupted after download before index creation for instance)
-				# Only files for which the parent index has a hash can be verified.
-				for (dirpath, dirnames, filenames) in os.walk(path):
-					break
-
-				for filename in filenames:
-					if filename.endswith('.tar.gz'):
-						version = filename.removeprefix(package_name).split('-')[1].rstrip('.tar.gz')
-					elif filename.endswith('.whl'):
-						version = filename.removeprefix(package_name).split('-')[1]
-					else:
-						continue
-
-					if versions[version][filename].get('local_state') is not None:
-						continue
-
-					if versions[version][filename].get('hash') is not None:
-						if versions[version][filename]['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, versions[version][filename]['hash_algo'])):
-							versions[version][filename]['local_state'] = STATE_OK
-							if local_versions.get(version) is None:
-								local_versions[version] = {}
-							local_versions[version][filename] = versions[version][filename]
-
-			else:
-				error_message = f'[{package_name}]Local path {path} not writable'
-				if args.ignore_errors is True:
-					print_error(error_message, 0)
-					raise Exception(error_message)
-				else:
-					print_error(error_message, FAILED_DIRECTORY)
-
-		else:
+		if not os.path.isdir(path):
 			try:
 				os.makedirs(path)
 			except Exception as e:
@@ -279,6 +193,90 @@ def download_package(args):
 					raise Exception(error_message)
 				else:
 					print_error(error_message, FAILED_DIRECTORY)
+
+		if not os.access(path, os.W_OK):
+			error_message = f'[{package_name}]Local path {path} not writable'
+			if args.ignore_errors is True:
+				print_error(error_message, 0)
+				raise Exception(error_message)
+			else:
+				print_error(error_message, FAILED_DIRECTORY)
+
+		path_index = f'{path}/index.html'
+		if os.path.isfile(path_index):
+			with open(path_index, 'r') as f:
+				local_versions = read_package_metadata(f.read(), package_name, True)
+
+		for version, local_files in local_versions.items():
+			for filename, local_file in local_files.items():
+				if local_file.get('hash') is not None and versions[version][filename].get('hash') is not None:
+					if local_file['hash'] == versions[version][filename]['hash']:
+						if os.path.isfile(f'{path}/{filename}'):
+							if local_file['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, local_file['hash_algo'])):
+								if filename.endswith('.whl'):
+									if os.path.isfile(f'{path}/{filename}.metadata'):
+										if versions[version][filename]['meta_hash'] == checksum(f'{path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
+											versions[version][filename]['local_state'] = STATE_OK
+											continue
+
+									versions[version][filename]['local_state'] = STATE_METADATA_MISSING
+									continue
+
+								versions[version][filename]['local_state'] = STATE_OK
+								continue
+
+					# mark for redownload
+					versions[version][filename]['local_state'] = STATE_MISSING
+				elif versions[version][filename].get('hash') is not None:
+					# compare local file hash and if ok add to  metadata (set changed flag)
+					if os.path.isfile(f'{path}/{filename}'):
+						if versions[version][filename]['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, versions[version][filename]['hash_algo'])):
+							if filename.endswith('.whl'):
+								if os.path.isfile(f'{path}/{filename}.metadata'):
+									if versions[version][filename]['meta_hash'] == checksum(f'{path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
+										versions[version][filename]['local_state'] = STATE_OK
+										local_versions[version][filename]['hash_algo'] = versions[version][filename]['hash_algo']
+										local_versions[version][filename]['hash'] = versions[version][filename]['hash']
+										continue
+
+								versions[version][filename]['local_state'] = STATE_METADATA_MISSING
+								continue
+
+							versions[version][filename]['local_state'] = STATE_OK
+							local_versions[version][filename]['hash_algo'] = versions[version][filename]['hash_algo']
+							local_versions[version][filename]['hash'] = versions[version][filename]['hash']
+							continue
+
+
+					versions[version][filename]['local_state'] = STATE_MISSING
+				else:
+					# compare local hash to verify integrity?
+					# log message that no comparison possible & mark for re-download?
+					# Do nothing is effectively STATE_MISSING
+					pass
+
+		# Check for local files that were not included in the local index for whatever reason (process interrupted after download before index creation for instance)
+		# Only files for which the parent index has a hash can be verified.
+		for (dirpath, dirnames, filenames) in os.walk(path):
+			break
+
+		for filename in filenames:
+			if filename.endswith('.tar.gz'):
+				version = filename.removeprefix(package_name).split('-')[1].rstrip('.tar.gz')
+			elif filename.endswith('.whl'):
+				version = filename.removeprefix(package_name).split('-')[1]
+			else:
+				continue
+
+			if versions[version][filename].get('local_state') is not None:
+				continue
+
+			if versions[version][filename].get('hash') is not None:
+				if versions[version][filename]['hash'] == checksum(f'{path}/{filename}', getattr(hashlib, versions[version][filename]['hash_algo'])):
+					versions[version][filename]['local_state'] = STATE_OK
+					if local_versions.get(version) is None:
+						local_versions[version] = {}
+					local_versions[version][filename] = versions[version][filename]
 
 		# check if already downloaded for each if not download
 		if versions.get(requested_version) is None:
@@ -401,6 +399,26 @@ def write_main_index(index_path):
 </html>
 ''')
 
+'''
+class RepositoryTree()
+
+Contains:
+1. All *requested* packages with their remote and local states
+2. All *local* packages with their state [[local state should also only read requested packages and their dependencies, since if a mirror is big the datastructure may get unnecissarily large]]
+
+Package states are only verified to prevent download, so if a package is not "hit" it is not verified.
+
+The "state" of a package is which versions are available from the source remote/local, which version(s) are requested and in the case verification happened the verification state
+
+Tree
+	Package
+		Versions = {}
+			State
+		UnsortableVersions = {}
+			State
+		RequestedVersions = []
+
+'''
 def requirements_loop(args):
 	try:
 		print(f'Processing requirements file: {args.package_name}')
