@@ -124,10 +124,46 @@ Tree
 		RequestedVersions = []
 
 '''
+class SimplePyPIMirrorTree:
+	def __init__(self, args):
+		self.tree = {}
+		self.errors = []
+		self.successful_packages = []
+		self.args = args
+
+	def add_request(self, package):
+		try:
+			if package.find('=') > 0:
+				pkg_name, pkg_version = package.split('=')[:2]
+			else:
+				pkg_name = package
+				pkg_version = None
+
+			if self.tree.get(pkg_name) is None:
+				self.tree[pkg_name] = SimplePyPIMirrorDistribution(package, self.args.local_path, self.args.index, self, self.args.include_beta)
+			else:
+				self.tree[pkg_name].get_version(pkg_version)
+
+			self.successful_packages.append(package)
+		except Exception as e:
+			print_error(f'requirements_loop() loop error: {e} with {package}', 0)
+			self.errors.append(f'[{package}]: {e}')
+
+	def print_summary(self):
+		if len(self.errors) > 0:
+			print(f'{len(self.errors)} packages had errors.\nThe following packages had errors:')
+			for error in self.errors:
+				print(error)
+
+		if len(self.successful_packages) > 0:
+			print(f'{len(self.successful_packages)} packages cached successfully:')
+			for pkg in self.successful_packages:
+				print(pkg)
+
 
 class SimplePyPIMirrorDistribution:
-	def __init__(self, name, local_path, remote_index, include_prereleases = False):
-
+	def __init__(self, name, local_path, remote_index, parent, include_prereleases = False):
+		self.parent = parent
 		self.name = name
 		self.newest_version = None
 		self.requested_version = None
@@ -403,40 +439,12 @@ def requirements_loop(args):
 			with open(args.package_name, 'r') as f:
 				packages = [line.lstrip(' -').rstrip('\n') for line in f.readlines() if line.find(':') == -1 and not line.startswith('#')]
 
-		local_args = args
-		errors = []
-		successful_packages = []
-		tree = {}
+		tree = SimplePyPIMirrorTree(args)
+
 		for package in sorted(set(packages)):
-			try:
-				if package.find('=') > 0:
-					pkg_name, pkg_version = package.split('=')[:2]
-				else:
-					pkg_name = package
-					pkg_version = None
+			tree.add_request(package)
 
-				#local_args.package_name = package
-				#download_package(local_args)
-
-				if tree.get(pkg_name) is None:
-					tree[pkg_name] = SimplePyPIMirrorDistribution(package, args.local_path, args.index, args.include_beta)
-				else:
-					tree[pkg_name].get_version(pkg_version)
-
-				successful_packages.append(package)
-			except Exception as e:
-				print_error(f'requirements_loop() loop error: {e} with {package}', 0)
-				errors.append(f'[{package}]: {e}')
-
-		if len(errors) > 0:
-			print(f'{len(errors)} packages had errors.\nThe following packages had errors:')
-			for error in errors:
-				print(error)
-
-		if len(successful_packages) > 0:
-			print(f'{len(successful_packages)} packages cached successfully:')
-			for pkg in successful_packages:
-				print(pkg)
+		tree.print_summary()
 
 	except Exception as e:
 		print_error(f'requirements_loop() error: {e}', 0)
