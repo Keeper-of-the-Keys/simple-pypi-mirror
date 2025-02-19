@@ -180,7 +180,7 @@ class SimplePyPIMirrorDistribution:
 		if len(self.remote_versions) > 0:
 			sorted_version_list = sorted([x for x in self.remote_versions.keys() if Version(x)], reverse=True, key=Version)
 			try:
-				newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
+				self.newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
 			except StopIteration:
 				# The distribution can be setup without a known newest version, 
 				# only at the download stage does this become an issue if no requested and no newest.
@@ -202,7 +202,6 @@ class SimplePyPIMirrorDistribution:
 				print_error(e, 0)
 
 	def read_local_metadata(self):
-
 		if not os.path.isdir(self.path):
 			try:
 				os.makedirs(self.path)
@@ -348,8 +347,9 @@ class SimplePyPIMirrorDistribution:
 
 	def download_version(self):
 		# check if already downloaded for each if not download
+		print(f'[{self.name}] Starting download of version: {self.requested_version}')
 		if self.remote_versions.get(self.requested_version) is None:
-			raise Exception(f'[{self.name}] Version {self.version} not found in remote index')
+			raise Exception(f'[{self.name}] Version {self.requested_version} not found in remote index')
 
 		for filename, pkg in self.remote_versions[self.requested_version].items():
 			local_filename = f'{self.local_path}{self.name}/{filename}'
@@ -358,7 +358,7 @@ class SimplePyPIMirrorDistribution:
 			# check metadata mark
 			if pkg.get('local_state') is not None:
 				if pkg['local_state'] == STATE_OK:
-					print(f'[{self.name}] STATE_OK Skipping')
+					print(f'[{self.name}] STATE_OK Skipping [{filename}]')
 					continue
 				elif pkg['local_state'] == STATE_METADATA_MISSING:
 					if pkg['href'].find('#') > 0:
