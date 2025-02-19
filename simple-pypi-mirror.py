@@ -431,40 +431,123 @@ class SimplePyPIMirrorDistribution:
 			self.name, self.requested_version = name.split('=')[:2]
 
 		self.local_path = local_path
+		self.path = f'{self.local_path}{self.name}'
 
 		self.local_versions = {}
 		self.remote_versions = self.get_metadata(remote_index)
 
-		if len(remote_versions) > 0:
-			sorted_version_list = sorted([x for x in remote_versions.keys() if Version(x)], reverse=True, key=Version)
+		if len(self.remote_versions) > 0:
+			sorted_version_list = sorted([x for x in self.remote_versions.keys() if Version(x)], reverse=True, key=Version)
 			try:
 				newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
 			except StopIteration:
+				# The distribution can be setup without a known newest version, 
+				# only at the download stage does this become an issue if no requested and no newest.
 				pass
 		else:
-			raise Exception(f'[{name}] Empty repository in remote index')
+			raise Exception(f'[{self.name}] Empty repository in remote index')
 
-		if requested_version is None and newest_version is not None:
-			requested_version = newest_version
+		if self.requested_version is None and self.newest_version is not None:
+			self.requested_version = self.newest_version
 
-		read_local_metadata()
+		self.read_local_metadata()
+		self.verify_local_metadata()
+		self.scan_local_files()
+
+		if self.requested_version is not None:
+			try:
+				self.download_version()
+			except Exception as e:
+				print_error(e, 0)
 
 	def read_local_metadata(self):
-		path = f'{self.local_path}{self.name}'
 
-		if not os.path.isdir(path):
+		if not os.path.isdir(self.path):
 			try:
-				os.makedirs(path)
+				os.makedirs(self.path)
 			except Exception as e:
-				raise Exception(f'[{self.name}]Failed to create directory {path} error: {e}')
+				raise Exception(f'[{self.name}]Failed to create directory {self.path} error: {e}')
 
-		if not os.access(path, os.W_OK):
-			raise Exception(f'[{self.name}]Local path {path} not writable')
+		if not os.access(self.path, os.W_OK):
+			raise Exception(f'[{self.name}]Local path {self.path} not writable')
 
-		path_index = f'{path}/index.html'
+		path_index = f'{self.path}/index.html'
 		if os.path.isfile(path_index):
 			with open(path_index, 'r') as f:
-				self.local_versions = read_package_metadata(f.read(), package_name, True)
+				self.local_versions = self.read_metadata(f.read())
+
+	def verify_local_metadata(self):
+		for version, local_files in self.local_versions.items():
+			for filename, local_file in local_files.items():
+				if local_file.get('hash') is not None and self.remote_versions[version][filename].get('hash') is not None:
+					if local_file['hash'] == self.remote_versions[version][filename]['hash']:
+						if os.path.isfile(f'{self.path}/{filename}'):
+							if local_file['hash'] == checksum(f'{self.path}/{filename}', getattr(hashlib, local_file['hash_algo'])):
+								if filename.endswith('.whl'):
+									if os.path.isfile(f'{self.path}/{filename}.metadata'):
+										if self.remote_versions[version][filename]['meta_hash'] == checksum(f'{self.path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
+											self.remote_versions[version][filename]['local_state'] = STATE_OK
+											continue
+
+									self.remote_versions[version][filename]['local_state'] = STATE_METADATA_MISSING
+									continue
+
+								self.remote_versions[version][filename]['local_state'] = STATE_OK
+								continue
+
+					# mark for redownload
+					self.remote_versions[version][filename]['local_state'] = STATE_MISSING
+				elif self.remote_versions[version][filename].get('hash') is not None:
+					# compare local file hash and if ok add to  metadata (set changed flag)
+					if os.path.isfile(f'{self.path}/{filename}'):
+						if self.remote_versions[version][filename]['hash'] == checksum(f'{self.path}/{filename}', getattr(hashlib, self.remote_versions[version][filename]['hash_algo'])):
+							if filename.endswith('.whl'):
+								if os.path.isfile(f'{self.path}/{filename}.metadata'):
+									if self.remote_versions[version][filename]['meta_hash'] == checksum(f'{self.path}/{filename}.metadata', getattr(hashlib, local_file['meta_hash_algo'])):
+										self.remote_versions[version][filename]['local_state'] = STATE_OK
+										self.local_versions[version][filename]['hash_algo'] = self.remote_versions[version][filename]['hash_algo']
+										self.local_versions[version][filename]['hash'] = self.remote_versions[version][filename]['hash']
+										continue
+
+								self.remote_versions[version][filename]['local_state'] = STATE_METADATA_MISSING
+								continue
+
+							self.remote_versions[version][filename]['local_state'] = STATE_OK
+							self.local_versions[version][filename]['hash_algo'] = self.remote_versions[version][filename]['hash_algo']
+							self.local_versions[version][filename]['hash'] = self.remote_versions[version][filename]['hash']
+							continue
+
+
+					self.remote_versions[version][filename]['local_state'] = STATE_MISSING
+				else:
+					# compare local hash to verify integrity?
+					# log message that no comparison possible & mark for re-download?
+					# Do nothing is effectively STATE_MISSING
+					pass
+
+	def scan_local_files(self):
+		# Check for local files that were not included in the local index for whatever reason (process interrupted after download before index creation for instance)
+		# Only files for which the parent index has a hash can be verified.
+		for (dirpath, dirnames, filenames) in os.walk(self.path):
+			break
+
+		for filename in filenames:
+			if filename.endswith('.tar.gz'):
+				version = filename.removeprefix(self.name).split('-')[1].rstrip('.tar.gz')
+			elif filename.endswith('.whl'):
+				version = filename.removeprefix(self.name).split('-')[1]
+			else:
+				continue
+
+			if self.remote_versions[version][filename].get('local_state') is not None:
+				continue
+
+			if self.remote_versions[version][filename].get('hash') is not None:
+				if self.remote_versions[version][filename]['hash'] == checksum(f'{self.path}/{filename}', getattr(hashlib, self.remote_versions[version][filename]['hash_algo'])):
+					self.remote_versions[version][filename]['local_state'] = STATE_OK
+					if self.local_versions.get(version) is None:
+						self.local_versions[version] = {}
+					self.local_versions[version][filename] = self.remote_versions[version][filename]
 
 
 	def get_metadata(self, index_url):
@@ -475,7 +558,7 @@ class SimplePyPIMirrorDistribution:
 			request = urllib.request.Request(url)
 			results = opener.open(request).read().decode('utf-8')
 
-			return read_metadata(results, self.name)
+			return self.read_metadata(results)
 
 		except Exception as e:
 			print_error(f'get_package_metadata error: {e}', 0)
@@ -522,6 +605,63 @@ class SimplePyPIMirrorDistribution:
 			print_error(f'read_package_metadata error: {e}', 0)
 			raise e
 
+	def download_version(self):
+		# check if already downloaded for each if not download
+		if self.remote_versions.get(self.requested_version) is None:
+			raise Exception(f'[{self.name}] Version {self.version} not found in remote index')
+
+		for filename, pkg in self.remote_versions[self.requested_version].items():
+			local_filename = f'{self.local_path}{self.name}/{filename}'
+
+
+			# check metadata mark
+			if pkg.get('local_state') is not None:
+				if pkg['local_state'] == STATE_OK:
+					print(f'[{self.name}] STATE_OK Skipping')
+					continue
+				elif pkg['local_state'] == STATE_METADATA_MISSING:
+					if pkg['href'].find('#') > 0:
+						uri, hash = pkg['href'].split('#')
+					else:
+						uri = pkg['href']
+
+					if download_file(f'{uri}.metadata', f'{local_filename}.metadata'):
+						print(f'[{self.name}] Retrieved metadata for {filename}')
+						continue
+					else:
+						print_error(f'[{self.name}] FAILED to retrieve metadata for {filename}', 0)
+						continue
+
+
+			#if args.binary_only == True and filename.endswith('.tar.gz'):
+			#	continue
+
+			#if args.source_only == True and filename.endswith('.whl'):
+			#	continue
+
+			if download_file(pkg['href'], local_filename):
+				if local_filename.endswith('.whl'):
+					if pkg['href'].find('#') > 0:
+						uri, hash = pkg['href'].split('#')
+					else:
+						uri = pkg['href']
+
+					if not download_file(f'{uri}.metadata', f'{local_filename}.metadata'):
+						print_error(f'[{self.name}] FAILED to retrieve metadata for {filename}', 0)
+
+				if self.local_versions.get(self.requested_version) is None:
+					self.local_versions[self.requested_version] = {}
+				self.local_versions[self.requested_version][filename] = pkg
+
+	def get_version(self, version):
+
+		self.requested_version = version
+
+		if self.requested_version is None and self.newest_version is not None:
+			self.requested_version = self.newest_version
+
+		self.download_version()
+
 	def write_package_index(self):
 		index_path = f'{self.local_path}{self.name}/index.html'
 
@@ -561,10 +701,23 @@ def requirements_loop(args):
 		local_args = args
 		errors = []
 		successful_packages = []
+		tree = {}
 		for package in sorted(set(packages)):
 			try:
-				local_args.package_name = package
-				download_package(local_args)
+				if package.find('=') > 0:
+					pkg_name, pkg_version = package.split('=')[:2]
+				else:
+					pkg_name = package
+					pkg_version = None
+
+				#local_args.package_name = package
+				#download_package(local_args)
+
+				if tree.get(pkg_name) is None:
+					tree[pkg_name] = SimplePyPIMirrorDistribution(package, args.local_path, args.index, args.include_beta)
+				else:
+					tree[pkg_name].get_version(pkg_version)
+
 				successful_packages.append(package)
 			except Exception as e:
 				print_error(f'requirements_loop() loop error: {e} with {package}', 0)
