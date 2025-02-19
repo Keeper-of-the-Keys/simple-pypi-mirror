@@ -419,6 +419,138 @@ Tree
 		RequestedVersions = []
 
 '''
+
+class SimplePyPIMirrorDistribution:
+	def __init__(self, name, local_path, remote_index, include_prereleases = False):
+
+		self.name = name
+		self.newest_version = None
+		self.requested_version = None
+
+		if name.find('=') > 0:
+			self.name, self.requested_version = name.split('=')[:2]
+
+		self.local_path = local_path
+
+		self.local_versions = {}
+		self.remote_versions = self.get_metadata(remote_index)
+
+		if len(remote_versions) > 0:
+			sorted_version_list = sorted([x for x in remote_versions.keys() if Version(x)], reverse=True, key=Version)
+			try:
+				newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
+			except StopIteration:
+				pass
+		else:
+			raise Exception(f'[{name}] Empty repository in remote index')
+
+		if requested_version is None and newest_version is not None:
+			requested_version = newest_version
+
+		read_local_metadata()
+
+	def read_local_metadata(self):
+		path = f'{self.local_path}{self.name}'
+
+		if not os.path.isdir(path):
+			try:
+				os.makedirs(path)
+			except Exception as e:
+				raise Exception(f'[{self.name}]Failed to create directory {path} error: {e}')
+
+		if not os.access(path, os.W_OK):
+			raise Exception(f'[{self.name}]Local path {path} not writable')
+
+		path_index = f'{path}/index.html'
+		if os.path.isfile(path_index):
+			with open(path_index, 'r') as f:
+				self.local_versions = read_package_metadata(f.read(), package_name, True)
+
+
+	def get_metadata(self, index_url):
+		try:
+			url = f'{index_url}{self.name}/'
+
+			opener = urllib.request.build_opener()
+			request = urllib.request.Request(url)
+			results = opener.open(request).read().decode('utf-8')
+
+			return read_metadata(results, self.name)
+
+		except Exception as e:
+			print_error(f'get_package_metadata error: {e}', 0)
+			raise e
+
+	def read_metadata(self, indexpage):
+		try:
+			soup = BeautifulSoup(indexpage, 'html.parser')
+
+			versions = {}
+			for link in soup.find_all('a'):
+				try:
+					pkg = link.attrs
+					pkg.update({'filename': link.get_text()})
+
+					if link.get_text().endswith('.tar.gz'):
+						version = link.get_text().removeprefix(self.name).split('-')[1].rstrip('.tar.gz')
+					elif link.get_text().endswith('.whl'):
+						version = link.get_text().removeprefix(self.name).split('-')[1]
+						if pkg.get('data-core-metadata') is not None:
+							# Strictly speaking this next check is not needed because the spec.
+							if pkg['data-core-metadata'].find('=') > 0:
+								pkg['meta_hash_algo'], pkg['meta_hash'] = pkg['data-core-metadata'].split('=')
+
+					else:
+						continue
+
+					if versions.get(version) is None:
+						versions[version] = {}
+
+					if pkg['href'].find('#') > 0:
+						url, hash_def = pkg['href'].split('#')
+						if hash_def.find('=') > 0:
+							pkg['hash_algo'], pkg['hash'] = hash_def.split('=')
+
+					versions[version][pkg['filename']] = pkg
+
+				except Exception as e:
+					print_error(f'read_package_metadata loop error: {e}\n{link}\n{pkg}', 0)
+					raise e
+			return versions
+
+		except Exception as e:
+			print_error(f'read_package_metadata error: {e}', 0)
+			raise e
+
+	def write_package_index(self):
+		index_path = f'{self.local_path}{self.name}/index.html'
+
+		with open(index_path, 'w') as f:
+		#write header
+			f.write(f'''
+<html>
+	<head>
+		<meta name="pypi:repository-version" content="1.3">
+		<title>Links for {self.name}</title>
+	</head>
+	<body>
+		<h1>Links for {self.name}</h1>
+''')
+
+			for version, filenames in metadata.items():
+				for filename, pkg in filenames.items():
+					href = f'href="{filename}#{pkg['hash_algo']}={pkg['hash']}"' if pkg.get('hash_algo') is not None else f'href="{filename}"'
+					data_requires_python = f'data-requires-python="{pkg['data-requires-python']}"' if pkg.get('data-requires-python') is not None else ''
+					data_dist_info_metadata = f'data-dist-info-metadata="{pkg['data-dist-info-metadata']}"' if pkg.get('data-dist-info-metadata') is not None else ''
+					data_core_metadata = f'data-core-metadata="{pkg['data-core-metadata']}"' if pkg.get('data-core-metadata') is not None else ''
+
+					f.write(f'\t\t<a {href} {data_requires_python} {data_dist_info_metadata} {data_core_metadata}>{filename}</a><br />\n')
+
+			f.write(f'''
+	</body>
+</html>
+''')
+
 def requirements_loop(args):
 	try:
 		print(f'Processing requirements file: {args.package_name}')
