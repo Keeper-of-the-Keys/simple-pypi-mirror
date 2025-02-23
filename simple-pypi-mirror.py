@@ -146,7 +146,7 @@ class SimplePyPIMirrorTree:
 
 			self.successful_packages.append(package)
 		except Exception as e:
-			print_error(f'requirements_loop() loop error: {e} with {package}', 0)
+			print_error(f'add_request() error: {e} with {package}', 0)
 			self.errors.append(f'[{package}]: {e}')
 
 	def print_summary(self):
@@ -178,7 +178,16 @@ class SimplePyPIMirrorDistribution:
 		self.remote_versions = self.get_metadata(remote_index)
 
 		if len(self.remote_versions) > 0:
-			sorted_version_list = sorted([x for x in self.remote_versions.keys() if Version(x)], reverse=True, key=Version)
+			sorted_version_list = []
+			for x in self.remote_versions.keys():
+				try:
+					y = Version(x)
+					sorted_version_list.append(x)
+				except Exception:
+					pass
+
+			sorted_version_list = sorted(sorted_version_list, reverse=True, key=Version)
+
 			try:
 				self.newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
 			except StopIteration:
@@ -510,7 +519,9 @@ if __name__ == "__main__":
 		if os.path.isfile(args.package_name):
 			requirements_loop(args)
 		else:
-			download_package(args)
+			tree = SimplePyPIMirrorTree(args)
+			tree.add_request(args.package_name)
+#			download_package(args)
 
 		write_main_index(args.local_path)
 
