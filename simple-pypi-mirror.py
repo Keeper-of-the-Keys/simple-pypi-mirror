@@ -85,46 +85,6 @@ def checksum(filename, hash_factory=hashlib.sha256, chunk_num_blocks=128):
 		print_error(f'checksum error: {e}', 0)
 		raise e
 
-def write_main_index(index_path):
-	for (dirpath, dirnames, filenames) in os.walk(index_path):
-		break
-
-	with open(f'{index_path}index.html', 'w') as f:
-		f.write('''
-<html>
-	<head>
-		<meta name="pypi:repository-version" content="1.3">
-		<title>Simple index</title>
-	</head>
-	<body>
-''')
-		for dirname in dirnames:
-			f.write(f'\t\t<a href="{dirname}">{dirname}</a><br />')
-		f.write('''
-	</body>
-</html>
-''')
-
-'''
-class RepositoryTree()
-
-Contains:
-1. All *requested* packages with their remote and local states
-2. All *local* packages with their state [[local state should also only read requested packages and their dependencies, since if a mirror is big the datastructure may get unnecissarily large]]
-
-Package states are only verified to prevent download, so if a package is not "hit" it is not verified.
-
-The "state" of a package is which versions are available from the source remote/local, which version(s) are requested and in the case verification happened the verification state
-
-Tree
-	Package
-		Versions = {}
-			State
-		UnsortableVersions = {}
-			State
-		RequestedVersions = []
-
-'''
 class SimplePyPIMirrorTree:
 	def __init__(self, args):
 		self.tree = {}
@@ -161,6 +121,32 @@ class SimplePyPIMirrorTree:
 			for pkg in self.successful_packages:
 				print(pkg)
 
+	def write_index(self):
+		print('Writing main index')
+		for (dirpath, dirnames, filenames) in os.walk(self.args.local_path):
+			break
+
+		with open(f'{self.args.local_path}index.html', 'w') as f:
+			f.write('''
+	<html>
+		<head>
+			<meta name="pypi:repository-version" content="1.3">
+			<title>Simple index</title>
+		</head>
+		<body>
+	''')
+			for dirname in dirnames:
+				f.write(f'\t\t<a href="{dirname}">{dirname}</a><br />')
+			f.write('''
+		</body>
+	</html>
+	''')
+
+	def write_indexes(self):
+		for name, dist in self.tree.items():
+			dist.write_index()
+
+		self.write_index()
 
 class SimplePyPIMirrorDistribution:
 	def __init__(self, name, local_path, remote_index, parent, include_prereleases = False):
@@ -168,7 +154,6 @@ class SimplePyPIMirrorDistribution:
 		self.name = name
 		self.newest_version = None
 		self.requested_version = None
-		self.sorted_version_list = []
 
 		if name.find('=') > 0:
 			self.name, self.requested_version = name.split('=')[:2]
@@ -178,6 +163,7 @@ class SimplePyPIMirrorDistribution:
 
 		self.local_versions = {}
 		self.remote_versions = self.get_metadata(remote_index)
+		self.sorted_version_list = []
 
 		if len(self.remote_versions) > 0:
 			for x in self.remote_versions.keys():
@@ -413,7 +399,8 @@ class SimplePyPIMirrorDistribution:
 
 		self.download_version()
 
-	def write_package_index(self):
+	def write_index(self):
+		print(f'[{self.name}] Writing index.')
 		index_path = f'{self.local_path}{self.name}/index.html'
 
 		with open(index_path, 'w') as f:
@@ -428,7 +415,7 @@ class SimplePyPIMirrorDistribution:
 		<h1>Links for {self.name}</h1>
 ''')
 
-			for version, filenames in metadata.items():
+			for version, filenames in self.local_versions.items():
 				for filename, pkg in filenames.items():
 					href = f'href="{filename}#{pkg['hash_algo']}={pkg['hash']}"' if pkg.get('hash_algo') is not None else f'href="{filename}"'
 					data_requires_python = f'data-requires-python="{pkg['data-requires-python']}"' if pkg.get('data-requires-python') is not None else ''
@@ -454,6 +441,7 @@ def requirements_loop(args):
 		for package in sorted(set(packages)):
 			tree.add_request(package)
 
+		tree.write_indexes()
 		tree.print_summary()
 
 	except Exception as e:
@@ -522,10 +510,7 @@ if __name__ == "__main__":
 		else:
 			tree = SimplePyPIMirrorTree(args)
 			tree.add_request(args.package_name)
-#			download_package(args)
-
-		write_main_index(args.local_path)
-
+			tree.write_indexes()
 
 	except Exception as e:
 		print_error(f'generic error: {e}')
