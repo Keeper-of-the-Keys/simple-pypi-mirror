@@ -36,6 +36,7 @@ try:
 	import shutil
 	import hashlib
 	import traceback
+	import re
 	from bs4 import BeautifulSoup
 	from packaging.version import Version, parse, InvalidVersion
 except Exception as e:
@@ -167,6 +168,7 @@ class SimplePyPIMirrorDistribution:
 		self.name = name
 		self.newest_version = None
 		self.requested_version = None
+		self.sorted_version_list = []
 
 		if name.find('=') > 0:
 			self.name, self.requested_version = name.split('=')[:2]
@@ -178,18 +180,17 @@ class SimplePyPIMirrorDistribution:
 		self.remote_versions = self.get_metadata(remote_index)
 
 		if len(self.remote_versions) > 0:
-			sorted_version_list = []
 			for x in self.remote_versions.keys():
 				try:
 					y = Version(x)
-					sorted_version_list.append(x)
+					self.sorted_version_list.append(x)
 				except Exception:
 					pass
 
-			sorted_version_list = sorted(sorted_version_list, reverse=True, key=Version)
+			self.sorted_version_list = sorted(self.sorted_version_list, reverse=True, key=Version)
 
 			try:
-				self.newest_version = next(v for v in sorted_version_list if Version(v).is_prerelease == include_prereleases)
+				self.newest_version = next(v for v in self.sorted_version_list if Version(v).is_prerelease == include_prereleases)
 			except StopIteration:
 				# The distribution can be setup without a known newest version, 
 				# only at the download stage does this become an issue if no requested and no newest.
