@@ -42,6 +42,14 @@ try:
 except Exception as e:
 	print_error(f'Failed imports: {e}', FAILED_IMPORTS)
 
+def positive_int(input):
+	int_input = int(input)
+
+	if int_input < 0:
+		raise argparse.ArgumentTypeError(f'{input} is negative, only positives accepted')
+
+	return int_input
+
 def download_file(url, destination):
 	try:
 		request = urllib.request.Request(url)
@@ -92,7 +100,7 @@ class SimplePyPIMirrorTree:
 		self.successful_packages = []
 		self.args = args
 
-	def add_request(self, package):
+	def add_request(self, package, parents = []):
 		try:
 			if package.find('=') > 0:
 				pkg_name, pkg_version = package.split('=')[:2]
@@ -100,10 +108,14 @@ class SimplePyPIMirrorTree:
 				pkg_name = package
 				pkg_version = None
 
+			if self.args.max_depth > 0 and self.args.max_depth < len(parents):
+				self.errors.append(f'{parents} Skipping {pkg_name} due to max dependency resolution depth ({self.args.max_depth})')
+				return
+
 			if self.tree.get(pkg_name) is None:
-				self.tree[pkg_name] = SimplePyPIMirrorDistribution(package, self.args.local_path, self.args.index, self, self.args.include_beta)
+				self.tree[pkg_name] = SimplePyPIMirrorDistribution(package, self, parents)
 			else:
-				self.tree[pkg_name].get_version(pkg_version)
+				self.tree[pkg_name].get_version(pkg_version, parents)
 
 			self.successful_packages.append(package)
 		except Exception as e:
@@ -149,20 +161,23 @@ class SimplePyPIMirrorTree:
 		self.write_index()
 
 class SimplePyPIMirrorDistribution:
-	def __init__(self, name, local_path, remote_index, parent, include_prereleases = False):
+	def __init__(self, name, parent, parents = []):
+		print(f'[{name}]__init_______________________________________________init_________________________________')
 		self.parent = parent
+		self.parents = parents
 		self.name = name
+
 		self.newest_version = None
 		self.requested_version = None
 
 		if name.find('=') > 0:
 			self.name, self.requested_version = name.split('=')[:2]
 
-		self.local_path = local_path
+		self.local_path = parent.args.local_path
 		self.path = f'{self.local_path}{self.name}'
 
 		self.local_versions = {}
-		self.remote_versions = self.get_metadata(remote_index)
+		self.remote_versions = self.get_metadata(parent.args.index)
 		self.sorted_version_list = []
 
 		if len(self.remote_versions) > 0:
@@ -176,7 +191,7 @@ class SimplePyPIMirrorDistribution:
 			self.sorted_version_list = sorted(self.sorted_version_list, reverse=True, key=Version)
 
 			try:
-				self.newest_version = next(v for v in self.sorted_version_list if Version(v).is_prerelease == include_prereleases)
+				self.newest_version = next(v for v in self.sorted_version_list if Version(v).is_prerelease == parent.args.include_beta)
 			except StopIteration:
 				# The distribution can be setup without a known newest version, 
 				# only at the download stage does this become an issue if no requested and no newest.
@@ -412,23 +427,28 @@ class SimplePyPIMirrorDistribution:
 					self.local_versions[self.requested_version]['dependencies'].append(dep[0])
 
 	def process_dependencies(self):
-		if self.local_versions[self.requested_version].get('dependencies') is None:
-			return
-		if len(self.local_versions[self.requested_version]['dependencies']) == 0:
-			return
+		try:
+			if self.local_versions[self.requested_version].get('dependencies') is None:
+				return True
+			if len(self.local_versions[self.requested_version]['dependencies']) == 0:
+				return True
 
-		print(self.local_versions[self.requested_version]['dependencies'])
-		# dep is a thruple (name, version_spec, extra)
-		for dep in self.local_versions[self.requested_version]['dependencies']:
-			if dep[1] == '':
-				print(f'[{self.name}] Requestion {dep}')
-				self.parent.add_request(dep[0])
-			else:
-				print(f'[{self.name}] Version specs are not yet supported for {dep}')
+			# dep is a thruple (name, version_spec, extra)
+			for dep in self.local_versions[self.requested_version]['dependencies']:
+				if dep[1] == '':
+					if dep[0] not in self.parents:
+						print(f'[{self.name}] Requesting {dep}')
+						self.parent.add_request(dep[0], [*self.parents, self.name])
+				else:
+					self.parent.errors.append(f'[{self.name}] Version specs are not yet supported for {dep}')
 
-	def get_version(self, version):
+		except Exception:
+			print(traceback.format_exc())
+
+	def get_version(self, version, parents = []):
 
 		self.requested_version = version
+		self.parents = set(self.parents + parents)
 
 		if self.requested_version is None and self.newest_version is not None:
 			self.requested_version = self.newest_version
@@ -453,6 +473,9 @@ class SimplePyPIMirrorDistribution:
 
 			for version, filenames in self.local_versions.items():
 				for filename, pkg in filenames.items():
+					if filename == 'dependencies':
+						continue
+
 					href = f'href="{filename}#{pkg['hash_algo']}={pkg['hash']}"' if pkg.get('hash_algo') is not None else f'href="{filename}"'
 					data_requires_python = f'data-requires-python="{pkg['data-requires-python']}"' if pkg.get('data-requires-python') is not None else ''
 					data_dist_info_metadata = f'data-dist-info-metadata="{pkg['data-dist-info-metadata']}"' if pkg.get('data-dist-info-metadata') is not None else ''
@@ -524,8 +547,15 @@ if __name__ == "__main__":
 
 		download.add_argument(	'--source-only',
 					dest 	= 'source_only',
-					help 	= 'Only download source archives (.tar.gz)',
+					help 	= 'Only download source archives (.tar.gz) [Currently this also means no dependencies]',
 					action	= 'store_true',
+					)
+
+		parser.add_argument(	'--max-depth',
+					dest 	= 'max_depth',
+					help 	= 'Max depth for dependency resolution, 0 for unlimited.',
+					default = 1,
+					type	= positive_int,
 					)
 
 		parser.add_argument(	'package_name',
@@ -547,6 +577,7 @@ if __name__ == "__main__":
 			tree = SimplePyPIMirrorTree(args)
 			tree.add_request(args.package_name)
 			tree.write_indexes()
+			tree.print_summary()
 
 	except Exception as e:
 		print_error(f'generic error: {e}')
