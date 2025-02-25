@@ -104,8 +104,9 @@ class SimplePyPIMirrorTree:
 		try:
 			if package.find('=') > 0:
 				pkg_name, pkg_version = package.split('=')[:2]
+				pkg_name = pkg_name.lower()
 			else:
-				pkg_name = package
+				pkg_name = package.lower()
 				pkg_version = None
 
 			if self.args.max_depth > 0 and self.args.max_depth < len(parents):
@@ -113,14 +114,14 @@ class SimplePyPIMirrorTree:
 				return
 
 			if self.tree.get(pkg_name) is None:
-				self.tree[pkg_name] = SimplePyPIMirrorDistribution(package, self, parents)
+				self.tree[pkg_name] = SimplePyPIMirrorDistribution(package.lower(), self, parents)
 			else:
 				self.tree[pkg_name].get_version(pkg_version, parents)
 
-			self.successful_packages.append(package)
+			self.successful_packages.append(package.lower())
 		except Exception as e:
-			print_error(f'add_request() error: {e} with {package}', 0)
-			self.errors.append(f'[{package}]: {e}')
+			print_error(f'add_request() error: {e} with {package.lower()}', 0)
+			self.errors.append(f'[{package.lower()}]: {e}')
 
 	def print_summary(self):
 		if len(self.errors) > 0:
