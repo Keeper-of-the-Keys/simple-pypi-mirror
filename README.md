@@ -12,14 +12,13 @@ The first allows mirroring only specific packages while the second is a full PyP
 Where this project (hopefully) shines is it's simplicity, instead of using `pip` to download the packages that you want to mirror it just downloads using the simple API and then builds simple API indexes.
 
 ## Limitations
-- At this time dependencies that are not resolved, thus only those packages that were explicitely requested are downloaded.
-While I hope to include support for dependencies it will probably involve a serious refactoring of the code.
+- At this time dependencies are only resolved if they don't have constraints on the version of the dependecy and only if binary files are downloaded.
+- No method to limit which binaries will be downloaded.
 - Only source archives (`.tar.gz`) and wheels (`.whl`) are downloaded, certain older packages have files with other extensions (`.zip`, `.exe`, etc) these are all ignored.
-- Packages that use version names/numbers that don't comply with `packaging.version.Version` are ignored, a solution for this is also in the works.
 
 ## Usage
 ```
-usage: ./simple-pypi-mirror.py [-h] [--index https://pypi.org/simple/] [--local-folder /var/www/pypi/simple/] [--ignore-errors] [--include-prereleases] [--binary-only | --source-only] (somepackage|somepackage=1.10.0|req.txt)
+usage: ./simple-pypi-mirror.py [-h] [--index https://pypi.org/simple/] [--local-folder /var/www/pypi/simple/] [--ignore-errors] [--include-prereleases] [--binary-only | --source-only] [--max-depth MAX_DEPTH] (somepackage|somepackage=1.10.0|req.txt)
 
 positional arguments:
   (somepackage|somepackage=1.10.0|req.txt)
@@ -35,7 +34,9 @@ options:
   --include-prereleases
                         Allow prerelease software to be downloaded when no version is specified.
   --binary-only         Only download binary wheel files (.whl)
-  --source-only         Only download source archives (.tar.gz)
+  --source-only         Only download source archives (.tar.gz) [Currently this also means no dependencies]
+  --max-depth MAX_DEPTH
+                        Max depth for dependency resolution, 0 for unlimited.
 ```
 ### Client
 You can use the index built by the script by serving the directory with any webserver (apache, nginx, python http.server) if your server doesn't use TLS the `pip` command would look like this:
