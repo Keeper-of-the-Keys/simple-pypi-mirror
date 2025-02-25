@@ -342,6 +342,9 @@ class SimplePyPIMirrorDistribution:
 			raise e
 
 	def download_version(self):
+		if self.local_versions.get(self.requested_version) is None:
+			self.local_versions[self.requested_version] = {}
+
 		# check if already downloaded for each if not download
 		print(f'[{self.name}] Starting download of version: {self.requested_version}')
 		if self.remote_versions.get(self.requested_version) is None:
@@ -364,11 +367,13 @@ class SimplePyPIMirrorDistribution:
 
 					if download_file(f'{uri}.metadata', f'{local_filename}.metadata'):
 						print(f'[{self.name}] Retrieved metadata for {filename}')
+						self.read_dependencies(f'{local_filename}.metadata')
 						continue
 					else:
 						print_error(f'[{self.name}] FAILED to retrieve metadata for {filename}', 0)
 						continue
-
+			else:
+				pkg['local_state'] = STATE_MISSING
 
 			#if args.binary_only == True and filename.endswith('.tar.gz'):
 			#	continue
@@ -385,10 +390,41 @@ class SimplePyPIMirrorDistribution:
 
 					if not download_file(f'{uri}.metadata', f'{local_filename}.metadata'):
 						print_error(f'[{self.name}] FAILED to retrieve metadata for {filename}', 0)
+						pkg['local_state'] = STATE_METADATA_MISSING
+					else:
+						self.read_dependencies(f'{local_filename}.metadata')
+						pkg['local_state'] = STATE_OK
 
-				if self.local_versions.get(self.requested_version) is None:
-					self.local_versions[self.requested_version] = {}
 				self.local_versions[self.requested_version][filename] = pkg
+				self.remote_versions[self.requested_version][filename]['local_state'] = pkg['local_state']
+
+		self.process_dependencies()
+
+	def read_dependencies(self, metadata_path):
+		if self.local_versions[self.requested_version].get('dependencies') is None:
+			self.local_versions[self.requested_version]['dependencies'] = []
+
+		print(f'[{self.name}] Reading dependencies [{metadata_path}]')
+
+		with open(f'{metadata_path}', 'r') as f:
+			for dep in [re.findall('^Requires-Dist: ([\\w\\-]+) ?([^\\;\\n]+)? ?;? ?(.*)?$', line) for line in f.readlines() if line.startswith('Requires-Dist:')]:
+				if dep[0] not in self.local_versions[self.requested_version]['dependencies']:
+					self.local_versions[self.requested_version]['dependencies'].append(dep[0])
+
+	def process_dependencies(self):
+		if self.local_versions[self.requested_version].get('dependencies') is None:
+			return
+		if len(self.local_versions[self.requested_version]['dependencies']) == 0:
+			return
+
+		print(self.local_versions[self.requested_version]['dependencies'])
+		# dep is a thruple (name, version_spec, extra)
+		for dep in self.local_versions[self.requested_version]['dependencies']:
+			if dep[1] == '':
+				print(f'[{self.name}] Requestion {dep}')
+				self.parent.add_request(dep[0])
+			else:
+				print(f'[{self.name}] Version specs are not yet supported for {dep}')
 
 	def get_version(self, version):
 
