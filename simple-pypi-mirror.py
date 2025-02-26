@@ -391,11 +391,11 @@ class SimplePyPIMirrorDistribution:
 			else:
 				pkg['local_state'] = STATE_MISSING
 
-			#if args.binary_only == True and filename.endswith('.tar.gz'):
-			#	continue
+			if self.parent.args.binary_only == True and filename.endswith('.tar.gz'):
+				continue
 
-			#if args.source_only == True and filename.endswith('.whl'):
-			#	continue
+			if self.parent.args.source_only == True and filename.endswith('.whl'):
+				continue
 
 			if download_file(pkg['href'], local_filename):
 				if local_filename.endswith('.whl'):
